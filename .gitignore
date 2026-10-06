@@ -1,0 +1,8 @@
+# Lo produce crear_base.py, siempre igual: no se versiona.
+data/
+# Salida de cada corrida.
+traces/
+resultados*.csv
+.env
+__pycache__/
+/.venv/

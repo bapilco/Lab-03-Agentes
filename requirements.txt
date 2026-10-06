@@ -1,0 +1,7 @@
+openai==3.22.1
+pandas==3.0.6
+matplotlib==3.11.2
+python-dotenv==1.2.3
+langgraph==1.2.12
+langchain-openai==1.6.7
+langchain-anthropic==1.7.5

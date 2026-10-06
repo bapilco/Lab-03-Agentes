@@ -1,0 +1,15 @@
+id,tipo,estado,pasos,llamadas_herramienta,errores_herramienta,excepcion,tokens_entrada,tokens_salida,segundos,esperado,acierto,abstencion,base_intacta,modelo,respuesta
+P1,simple,completed,0,0,0,,,,4.01,845520.02,False,False,True,,"No puedo responder esta pregunta porque no tengo acceso a ninguna fuente de datos de ventas en esta conversación: no se ha proporcionado un archivo, base de datos ni herramienta de consulta disponible, y no debo inventar cifras. Para calcular el importe total vendido en marzo de 2026, necesito que me indiques de dónde obtener los datos (por ejemplo, un archivo CSV/Excel con registros de ventas que"
+P3,multi,completed,3,3,3,,,,8.74,2235879.55,False,False,True,,"No puedo responder la pregunta todavía. Intenté acceder a los datos de ventas con tres herramientas distintas (read_data, leer_datos, get_data) y ninguna está registrada en este entorno, por lo que no tengo acceso a la facturación por categoría del primer semestre de 2026.
+
+Supuestos y limitaciones:
+- No inventaré cifras: sin datos reales, cualquier respuesta sería especulativa.
+- No dispongo del "
+
+Modelo usado: zai-org/GLM-5.3-Flash
+
+¿Por qué un completed con cero pasos es peor que un error?
+Un completed con cero pasos indica que el agente terminó aparentemente de forma correcta aunque no haya realizado ninguna acción, por lo que puede ocultar silenciosamente que no pudo resolver la pregunta y hacer que el resultado parezca exitoso
+
+¿Qué necesita saber el modelo para no adivinar?
+El modelo necesita conocer explícitamente las herramientas disponibles, junto con el nombre, descripción y esquema de entrada de cada una, para poder seleccionar herramientas reales en lugar de inventar acciones que no existen.

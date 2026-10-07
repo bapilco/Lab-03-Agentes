@@ -573,7 +573,7 @@ class AnalystAgent:
                 model_output, assistant_message, usage_data = self._call_llm(messages)
             except Exception as exc:
                 error_message = str(exc)
-        
+                usage_total["error"] = error_message
                 result = {
                     "question": question,
                     "answer": "No pude completar la tarea debido a un error.",
@@ -595,6 +595,22 @@ class AnalystAgent:
                 usage_total["error"] = usage_data["error"]
             
             if "final" in model_output:
+                trace.append(
+                    TraceStep(
+                        step=step_number,
+                        thought=model_output.get("thought"),
+                        action=None,
+                        observation={
+                            "final": model_output["final"]
+                        },
+                        model=usage_data.get("model"),
+                        input_tokens=usage_data.get("input_tokens", 0),
+                        output_tokens=usage_data.get("output_tokens", 0),
+                        latency_seconds=usage_data.get("latency_seconds", 0.0),
+                        error=usage_data.get("error"),
+                    )
+                )
+            
                 result = {
                     "question": question,
                     "answer": model_output["final"],
@@ -603,6 +619,7 @@ class AnalystAgent:
                     "model": self.model,
                     "usage": usage_total,
                 }
+            
                 self._write_trace(result)
                 return result
 
@@ -624,13 +641,21 @@ class AnalystAgent:
                 )
             )
 
-            messages.append({
-                "role": "assistant",
-                "content": json.dumps(
-                    model_output,
-                    ensure_ascii=False
-                )
-            })
+            if assistant_message is not None:
+                messages.append(assistant_message)
+
+            tool_call_id = None
+
+            if assistant_message is not None:
+                tool_call_id = assistant_message["tool_calls"][0]["id"]
+            else:
+                messages.append({
+                    "role": "assistant",
+                    "content": json.dumps(
+                        model_output,
+                        ensure_ascii=False
+                    )
+                })
 
             if isinstance(action, dict):
                 tool_name = action.get("name")
@@ -642,23 +667,36 @@ class AnalystAgent:
                 observation
             )
 
-            messages.append({
-                "role": "user",
-                "content": (
-                    "Observation: "
-                    + json.dumps(
+            if tool_call_id is not None:
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": json.dumps(
                         model_observation,
                         ensure_ascii=False
                     )
-                )
-            })
+                })
+            else:
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "Observation: "
+                        + json.dumps(
+                            model_observation,
+                            ensure_ascii=False
+                        )
+                    )
+                })
 
         result = {
             "question": question,
             "answer": "No pude completar la tarea dentro del limite de pasos.",
             "trace": [asdict(step) for step in trace],
             "status": "max_steps_reached",
+            "model": self.model,
+            "usage": usage_total,
         }
+
         self._write_trace(result)
         return result
 
@@ -670,5 +708,5 @@ class AnalystAgent:
 
 if __name__ == "__main__":
     agent = AnalystAgent()
-    question = "REEMPLAZAR por una pregunta analitica sobre tu dataset."
+    question = "Obtén el precio_unitario y la cantidad de las ventas, calcula estadísticas descriptivas para ambas columnas y genera un gráfico de precio_unitario frente a cantidad."
     print(json.dumps(agent.run(question), indent=2, ensure_ascii=False))

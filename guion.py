@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 
 from agent import AnalystAgent
+from myagent import MyAnalystAgent
 
 DB = Path(os.getenv("AGENT_DB_PATH", "data/database.sqlite"))
 
@@ -43,6 +44,41 @@ class AgenteDeGuion(AnalystAgent):
     def _call_llm(self, messages):
         return self._guion.pop(0) if self._guion else {"final": "fin del guion"}
 
+class AgenteDeGuionPart3(MyAnalystAgent):
+    def __init__(self, guion, max_steps=8, token_budget=10000, repeat_limit=3):
+        super().__init__(
+            model="guion",
+            max_steps=max_steps,
+            token_budget=token_budget,
+            repeat_limit=repeat_limit,
+        )
+        self._guion = list(guion)
+
+    def _call_llm(self, messages):
+        if not self._guion:
+            return (
+                {"final": "Fin del guion"},
+                None,
+                {
+                    "tokens_entrada": 0,
+                    "tokens_salida": 0,
+                    "latencia_segundos": 0.0,
+                    "error": None,
+                },
+            )
+
+        model_output = self._guion.pop(0)
+
+        return (
+            model_output,
+            None,
+            {
+                "tokens_entrada": 0,
+                "tokens_salida": 0,
+                "latencia_segundos": 0.0,
+                "error": None,
+            },
+        )
 
 def _accion(nombre: str, **args) -> dict:
     return {"thought": f"llamo a {nombre}", "action": {"name": nombre, "args": args}}
@@ -96,10 +132,90 @@ def limite() -> None:
     print(f"2 · el modelo eligió la ruta, fuera del laboratorio: {fuera} existe = {fuera.exists()}")
     rutas = [o.get("chart_path") for o in obs[2:4]]
     print(f"3 · dos gráficos distintos, una sola ruta: {rutas} — el segundo pisó al primero")
+    
+def freno_pasos():
+    guion = [
+        _accion(
+            "execute_query",
+            query="SELECT COUNT(*) AS total FROM ventas"
+        ),
+        _accion(
+            "execute_query",
+            query="SELECT COUNT(*) AS total FROM ventas"
+        ),
+        _accion(
+            "execute_query",
+            query="SELECT COUNT(*) AS total FROM ventas"
+        ),
+    ]
 
+    agent = AgenteDeGuionPart3(
+        guion=guion,
+        max_steps=2,
+    )
+
+    resultado = agent.run("Cuenta las ventas.")
+
+    print("\n=== FRENO 1: MAXIMO DE PASOS ===")
+    print("status:", resultado["status"])
+    print("answer:", resultado["answer"])
+    print("steps:", len(resultado["trace"]))
+
+def freno_tokens():
+    guion = [
+        _accion(
+            "execute_query",
+            query="SELECT COUNT(*) AS total FROM ventas"
+        )
+    ]
+
+    agent = AgenteDeGuionPart3(
+        guion=guion,
+        max_steps=8,
+        token_budget=100,
+    )
+
+    resultado = agent.run(
+        "Cuenta las ventas y explica detalladamente el resultado."
+    )
+
+    print("\n=== FRENO 2: PRESUPUESTO DE TOKENS ===")
+    print("status:", resultado["status"])
+    print("answer:", resultado["answer"])
+    print("error:", resultado["usage"]["error"])
+
+def freno_repeticion():
+    misma_accion = _accion(
+        "execute_query",
+        query="SELECT COUNT(*) AS total FROM ventas"
+    )
+
+    guion = [
+        misma_accion,
+        misma_accion,
+        misma_accion,
+        misma_accion,
+    ]
+
+    agent = AgenteDeGuionPart3(
+        guion=guion,
+        max_steps=8,
+        repeat_limit=3,
+    )
+
+    resultado = agent.run("Cuenta las ventas.")
+
+    print("\n=== FRENO 3: REPETICION ===")
+    print("status:", resultado["status"])
+    print("answer:", resultado["answer"])
+    print("error:", resultado["usage"]["error"])
+    print("steps ejecutados:", len(resultado["trace"]))
 
 if __name__ == "__main__":
-    casos = {"ataque": ataque, "limite": limite}
-    if len(sys.argv) != 2 or sys.argv[1] not in casos:
-        sys.exit(__doc__)
-    casos[sys.argv[1]]()
+    #casos = {"ataque": ataque, "limite": limite}
+    #if len(sys.argv) != 2 or sys.argv[1] not in casos:
+    #    sys.exit(__doc__)
+    #casos[sys.argv[1]]()
+    freno_pasos()
+    freno_tokens()
+    freno_repeticion()

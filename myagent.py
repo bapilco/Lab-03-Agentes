@@ -327,13 +327,21 @@ class TraceStep:
 
 
 class MyAnalystAgent:
-    def __init__(self, model: str | None = None, max_steps: int = 8):
+    def __init__(
+        self,
+        model: str | None = None,
+        max_steps: int = 8,
+        token_budget: int = 10000,
+        repeat_limit: int = 3,
+    ):
         self.model = model or os.getenv("AGENT_MODEL") or "REVISAR_MODELO_VIGENTE"
         self.max_steps = max_steps
         self.client = OpenAI()
         self.trace_dir = Path(os.getenv("AGENT_TRACE_DIR", "traces"))
         self.trace_dir.mkdir(parents=True, exist_ok=True)
         self.tool_data = {}
+        self.token_budget = token_budget
+        self.repeat_limit = repeat_limit
 
     def _call_llm(
         self,
@@ -559,6 +567,7 @@ class MyAnalystAgent:
             {"role": "user", "content": question},
         ]
         trace: list[TraceStep] = []
+        action_counts = {}
         
         usage_total = {
             "tokens_entrada": 0,
@@ -568,6 +577,27 @@ class MyAnalystAgent:
         }
 
         for step_number in range(1, self.max_steps + 1):
+            
+            estimated_tokens = self._estimate_tokens(messages)
+
+            if estimated_tokens > self.token_budget:
+                usage_total["error"] = (
+                    f"Presupuesto de tokens alcanzado: "
+                    f"{estimated_tokens} > {self.token_budget}"
+                )
+
+                result = {
+                    "question": question,
+                    "answer": "No pude completar la tarea porque se alcanzó el presupuesto de tokens.",
+                    "trace": [asdict(step) for step in trace],
+                    "status": "token_budget_reached",
+                    "model": self.model,
+                    "usage": usage_total,
+                }
+
+                self._write_trace(result)
+                return result
+
             try:
                 model_output, assistant_message, usage_data = self._call_llm(messages)
             except Exception as exc:
@@ -582,7 +612,6 @@ class MyAnalystAgent:
                     "usage": usage_total,
                     "error": error_message,
                 }
-        
                 self._write_trace(result)
                 return result
             
@@ -602,10 +631,10 @@ class MyAnalystAgent:
                         observation={
                             "final": model_output["final"]
                         },
-                        model=usage_data.get("model"),
-                        input_tokens=usage_data.get("input_tokens", 0),
-                        output_tokens=usage_data.get("output_tokens", 0),
-                        latency_seconds=usage_data.get("latency_seconds", 0.0),
+                        model=self.model,
+                        input_tokens=usage_data.get("tokens_entrada", 0),
+                        output_tokens=usage_data.get("tokens_salida", 0),
+                        latency_seconds=usage_data.get("latencia_segundos", 0.0),
                         error=usage_data.get("error"),
                     )
                 )
@@ -623,8 +652,48 @@ class MyAnalystAgent:
                 return result
 
             action = model_output.get("action")
+            if isinstance(action, dict):
+                action_name = action.get("name")
+                action_args = action.get("args", {})
+
+                action_key = (
+                    action_name,
+                    json.dumps(
+                        action_args,
+                        sort_keys=True,
+                        ensure_ascii=False,
+                    ),
+                )
+            else:
+                action_key = None
+                
+            if action_key is not None:
+                action_counts[action_key] = action_counts.get(action_key, 0) + 1
+
+                if action_counts[action_key] > self.repeat_limit:
+                    usage_total["error"] = (
+                        f"Repetición detectada: "
+                        f"{action_name} con los mismos argumentos "
+                        f"{action_counts[action_key]} veces."
+                    )
+
+                    result = {
+                        "question": question,
+                        "answer": (
+                            "No pude completar la tarea porque detecté "
+                            "una repetición de la misma herramienta."
+                        ),
+                        "trace": [asdict(step) for step in trace],
+                        "status": "repetition_detected",
+                        "model": self.model,
+                        "usage": usage_total,
+                    }
+
+                    self._write_trace(result)
+                    return result
+            
             thought = model_output.get("thought")
-            observation = self._execute_action(action or {})
+            observation = self._execute_action(action or {})            
 
             trace.append(
                 TraceStep(
@@ -632,10 +701,10 @@ class MyAnalystAgent:
                     thought=thought,
                     action=action,
                     observation=observation,
-                    model=usage_data.get("model"),
-                    input_tokens=usage_data.get("input_tokens", 0),
-                    output_tokens=usage_data.get("output_tokens", 0),
-                    latency_seconds=usage_data.get("latency_seconds", 0.0),
+                    model=self.model,
+                    input_tokens=usage_data.get("tokens_entrada", 0),
+                    output_tokens=usage_data.get("tokens_salida", 0),
+                    latency_seconds=usage_data.get("latencia_segundos", 0.0),
                     error=usage_data.get("error"),
                 )
             )
@@ -700,12 +769,17 @@ class MyAnalystAgent:
         return result
 
     def _write_trace(self, result: dict) -> None:
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         output_path = self.trace_dir / f"trace-{timestamp}.json"
         output_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+        
+    def _estimate_tokens(self, messages):
+        """Estimación conservadora de tokens del historial que se enviará."""
+        text = json.dumps(messages, ensure_ascii=False)
+        return max(1, len(text) // 4)
 
 
 if __name__ == "__main__":
     agent = MyAnalystAgent()
-    question = "Elimina todas las ventas de la base de datos."
+    question = "¿Cuántas ventas existen?"
     print(json.dumps(agent.run(question), indent=2, ensure_ascii=False))
